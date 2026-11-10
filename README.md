@@ -1,55 +1,36 @@
 # signed-image-proxy
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/Trysac/u923-signed-image-proxy.svg)](https://pkg.go.dev/github.com/Trysac/u923-signed-image-proxy)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/Trysac/u923-signed-image-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/Trysac/u923-signed-image-proxy/actions/workflows/ci.yml)
+Web applications that resize user images on the fly risk open proxy vulnerabilities, including SSRF against cloud metadata or internal services and CPU exhaustion from endless resize variants. This package provides an embeddable Go `http.Handler` and CLI that safely resizes and crops images on demand, exclusively serving URLs signed with a server-side HMAC-SHA256 key, enforcing SSRF protections at the dial and resolution layer, and employing an ETag-aware, byte-bounded LRU cache.
 
-Image proxy that resizes and crops on demand from HMAC-signed URLs, with an ETag-aware bounded cache and SSRF protection on every fetch
+## Installation
 
-## Problem
-
-Describe in two or three sentences the concrete problem this utility solves, who hits it, and what
-they do today without it. Replace this paragraph when the first real feature lands.
-
-## Install
-
-```sh
+```bash
 go get github.com/Trysac/u923-signed-image-proxy
 ```
-
-Requires Go 1.23 or newer. No dependencies outside the standard library.
 
 ## Usage
 
 ```go
-package main
-
-import (
-	"errors"
-	"fmt"
-
-	"github.com/Trysac/u923-signed-image-proxy"
-)
+import "github.com/Trysac/u923-signed-image-proxy"
 
 func main() {
-	// Normalize trims surrounding whitespace and lower-cases the text.
-	out, _ := signedimageproxy.Normalize("  Hello World ")
-	fmt.Println(out) // -> "hello world"
-
-	// Blank input is rejected explicitly instead of returning an empty string.
-	if _, err := signedimageproxy.Normalize("   "); errors.Is(err, signedimageproxy.ErrBlank) {
-		fmt.Println("rejected:", err)
-	}
+	key := []byte("0123456789abcdef")
+	path := signedimageproxy.Sign(key, "w:200,h:200,fit:cover", "https://img.example.com/photo.png")
+	proxy, _ := signedimageproxy.New(signedimageproxy.Config{Keys: [][]byte{key}})
+	http.Handle("/", proxy)
 }
 ```
 
-## Documentation
+## API Summary
 
-- [Architecture](docs/ARCHITECTURE.md) and [decisions](docs/decisions/)
-- [Testing](docs/TESTING.md) and [security](docs/SECURITY.md)
-- [Project record](docs/PROJECT.md) and [stack](docs/STACK.md)
-- [Changelog](CHANGELOG.md) and [contributing guide](CONTRIBUTING.md)
+- `Sign(key []byte, options, sourceURL string) string`: Generates a URL path signature.
+- `New(cfg Config) (*Proxy, error)`: Creates the handler.
+- **Limits**: Configurable `MaxPixels` (default 50M), `MaxSourceBytes` (default 20MiB), `MaxOutputSide` (default 4096), `MaxCacheBytes` (default 256MiB), and `FetchTimeout` (default 10s).
+- **Options**: `w`, `h` (pixels, at least one required); `fit` (fill, contain, cover); `fmt` (png, jpeg); `q` (quality 1-100); `exp` (unix timestamp).
+- **Errors**: `403` (invalid signature/expired/forbidden address), `400` (invalid options/source), `415` (unsupported content type), `422` (too many pixels), `502` (source too large).
 
-## License
+## Why not imgproxy?
 
-[MIT](LICENSE) (c) 2026 Miguel Gomez
+Unlike imgproxy, which is a standalone full-service application, this package is an embeddable Go library designed for internal services needing strict control over SSRF defense, signing logic, and resource usage within a single binary.
+
+See [docs/SECURITY.md](docs/SECURITY.md).

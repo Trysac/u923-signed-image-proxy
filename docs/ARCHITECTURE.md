@@ -1,30 +1,20 @@
 # Architecture
 
-## Purpose
+## Overview
 
-`github.com/Trysac/u923-signed-image-proxy` is a small, dependency-free Go library: Image proxy that resizes and crops on demand from HMAC-signed URLs, with an ETag-aware bounded cache and SSRF protection on every fetch
+`signedimageproxy` is structured as a single, self-contained library package with a thin CLI entrypoint in `cmd/signed-image-proxy`.
 
-## Shape
+## Request Pipeline
 
-```text
-caller code --> package signedimageproxy (repository root)
-                    |
-                    +-- pure functions, no I/O, no global mutable state
-                    +-- internal/ (optional private helpers)
-```
+Every incoming HTTP request executes checks in a strict deterministic order:
 
-- **Public API**: every exported identifier of the root package. Unexported identifiers and
-  `internal/` packages may change without a major version.
-- **Errors**: invalid input returns an error; exported sentinel errors (such as `ErrBlank`) let
-  callers branch with `errors.Is`. The library never panics on input, prints or exits.
-- **Side effects**: none. If a feature needs I/O, accept an interface (`io.Reader` or a small
-  custom one) instead of opening resources, and record the choice in an ADR.
-
-## Quality contract
-
-`scripts/check` is the single definition of the gates; `fabrica.json` tells the factory and CI
-how to run it. See [TESTING.md](TESTING.md).
-
-## Decisions
-
-Architecture decisions are recorded in [decisions/](decisions/) as numbered ADRs.
+1. **Path Shape & Signature Verification (`403`)**: Splits `/<signature>/<options>/<source>` and verifies the 43-character raw base64url HMAC-SHA256 signature against `Config.Keys` using `hmac.Equal`.
+2. **Expiration (`403`)**: Parses the `exp` option if present and compares it against `Config.Clock()`.
+3. **Options Validation (`400`)**: Validates `w`, `h`, `fit`, `fmt`, `q`, and `exp`, rejecting unknown or duplicate option keys.
+4. **Cache Lookup (`200` / `304`)**: Checks the byte-bounded LRU cache keyed by the full signed request path and handles `If-None-Match` ETag revalidation.
+5. **Source URL Validation (`400`)**: Base64url-decodes the source URL and enforces `http`/`https`, no userinfo, and `AllowedHosts`.
+6. **Single-Flight Fetch, Decode, Transform, Encode, and Store**:
+   - Concurrent cache misses for the same path share one upstream fetch and image resize run under `context.WithoutCancel` bounded by `FetchTimeout`.
+   - Each hop (up to 3 redirects) resolves hostnames via `Resolver`, checks that every IP is public, and dials the verified IP literal directly.
+   - `image.DecodeConfig` enforces `MaxPixels` before `image.Decode` allocates pixel memory.
+   - `golang.org/x/image/draw.CatmullRom` performs `fill`, `contain`, or `cover` resampling.
