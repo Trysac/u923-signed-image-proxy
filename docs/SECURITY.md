@@ -1,23 +1,18 @@
-# Security notes
+# Security Policy and Threat Model
 
-## Threat model
+## Threat Model
 
-`github.com/Trysac/u923-signed-image-proxy` is a pure library without I/O. The main risks are:
+`signedimageproxy` defends against:
 
-- **Supply chain**: a compromised dependency or CI action. Mitigation: standard library only,
-  `go.sum` verification, `govulncheck` in the local gates, Dependabot weekly updates, actions
-  pinned by commit SHA, minimal workflow permissions.
-- **Leaked secrets**: tokens committed by mistake. Mitigation: `gitleaks` runs in the local gates
-  and in CI; `.env` files are git-ignored.
-- **Insecure code**: disabled TLS verification, weak crypto, command injection. Mitigation: a
-  `security` gate (gosec, high severity fails, `#nosec` ignored); fix the code instead of silencing
-  it.
-- **Untrusted input**: callers may pass hostile strings. Mitigation: validate input and return
-  explicit errors; never use `unsafe` or `os/exec` with untrusted data.
+1. **Unsigned/Tampered URLs**: Enforces HMAC-SHA256 verification using constant-time `hmac.Equal`.
+2. **SSRF**: Refuses private/loopback/reserved IP addresses (RFC 1918, link-local, etc.) by validating resolved addresses at dial time; uses direct IP dialing to mitigate DNS rebinding; caps redirects at 3.
+3. **Decompression Bombs**: Uses `image.DecodeConfig` to cap total pixels (`MaxPixels`) before allocating memory for full decode.
+4. **Oversized Downloads**: Limits source body streams to `MaxSourceBytes`.
+5. **Cache Exhaustion**: Tracks total byte usage in the LRU cache against `MaxCacheBytes`.
+6. **Content-Sniffing**: Sets `X-Content-Type-Options: nosniff` and a restrictive `Content-Security-Policy`.
 
-## Publishing
+### Not Defended
 
-Releases are git tags served through the Go module proxy and checksum database. No registry token
-is stored in the repository.
-
-To report a vulnerability, see [SECURITY.md](../SECURITY.md).
+- **CPU Exhaustion**: Does not implement rate limiting; deploy behind a CDN or WAF.
+- **Key Compromise**: Requires secure management of `Config.Keys`.
+- **Zero-Day Decoders**: Relies on Go's standard library `image/*` packages.

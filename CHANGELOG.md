@@ -9,4 +9,5 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Added HMAC-SHA256 signed image proxy handler, URL signer, SSRF-safe dialer, ETag LRU cache, and CLI.
 - Initial project structure from the factory utility template.
